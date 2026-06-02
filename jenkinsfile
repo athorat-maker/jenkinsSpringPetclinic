@@ -1,0 +1,116 @@
+pipeline {
+
+    agent any
+
+    environment {
+
+        SHORT_COMMIT = ''
+
+        DOCKER_CREDS = credentials('docker-registry-creds')
+
+        DOCKER_USER = "athorat2003"
+        DOCKER_PASS = "123456789"
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                checkout scm
+
+                script {
+                    env.SHORT_COMMIT = env.GIT_COMMIT.take(7)
+                }
+            }
+        }
+
+        stage('Checkstyle') {
+            when {
+                not {
+                    branch 'main'
+                }
+            }
+
+            steps {
+                sh './gradlew checkstyleMain'
+            }
+        }
+
+        stage('Test') {
+            when {
+                not {
+                    branch 'main'
+                }
+            }
+
+            steps {
+                sh './gradlew test'
+            }
+        }
+
+        stage('Build') {
+            when {
+                not {
+                    branch 'main'
+                }
+            }
+
+            steps {
+                sh './gradlew build -x test'
+            }
+
+            post {
+                success {
+                    archiveArtifacts(
+                        artifacts: 'build/libs/*.jar',
+                        fingerprint: true
+                    )
+                }
+            }
+        }
+
+        stage('Docker Build & Push MR') {
+
+            when {
+                not {
+                    branch 'main'
+                }
+            }
+
+            steps {
+                sh '''
+                    echo "$DOCKER_PASS" | docker login \
+                    -u "$DOCKER_USER" \
+                    --password-stdin
+
+                    docker build \
+                    -t $DOCKER_USER/mr:$SHORT_COMMIT .
+
+                    docker push \
+                    $DOCKER_USER/mr:$SHORT_COMMIT
+                '''
+            }
+        }
+
+        stage('Docker Build & Push Main') {
+
+            when {
+                branch 'main'
+            }
+
+            steps {
+                sh '''
+                    echo "$DOCKER_PASS" | docker login \
+                    -u "$DOCKER_USER" \
+                    --password-stdin
+
+                    docker build \
+                    -t $DOCKER_USER/main:$SHORT_COMMIT .
+
+                    docker push \
+                    $DOCKER_USER/main:$SHORT_COMMIT
+                '''
+            }
+        }
+    }
+}
